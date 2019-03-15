@@ -1,0 +1,210 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  ContainerImage:
+    Description: Repository URL for DAM Docker Image
+    Type: String
+  DesiredCapacity:
+    Type: Number
+    Default: '3'
+    Description: Number of instances to launch in your ECS cluster.
+  MaxSize:
+    Type: Number
+    Default: '4'
+    Description: Maximum number of instances that can be launched in your ECS cluster.
+    
+Mappings:
+  SubnetConfig:
+    VPC:
+      CIDR: '172.0.0.0/16'
+    PublicOne:
+      CIDR: '172.0.0.0/24'
+    PublicTwo:
+      CIDR: '172.0.1.0/24'
+
+Resources:
+  # VPC into which stack instances will be placed
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: !FindInMap ['SubnetConfig', 'VPC', 'CIDR']
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 0
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PublicOne', 'CIDR']
+      MapPublicIpOnLaunch: true
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 1
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PublicTwo', 'CIDR']
+      MapPublicIpOnLaunch: true
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref 'VPC'
+      InternetGatewayId: !Ref 'InternetGateway'
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachement
+    Properties:
+      RouteTableId: !Ref 'PublicRouteTable'
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref 'InternetGateway'
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetOne
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetTwo
+      RouteTableId: !Ref PublicRouteTable
+
+  # ECS Cluster 
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+
+  # This is an IAM role which authorizes ECS to manage resources on your account on your behalf, such as updating your
+  # load balancer with the details of where your containers are, so that traffic can reach your containers.
+  
+  EcsServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: ecs.amazonaws.com
+      Path: /
+      Policies:
+      - PolicyName: ecs-service
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - ec2:AttachNetworkInterface
+            - ec2:CreateNetworkInterface
+            - ec2:CreateNetworkInterfacePermission
+            - ec2:DeleteNetworkInterface
+            - ec2:DeleteNetworkInterfacePermission
+            - ec2:Describe*
+            - ec2:DetachNetworkInterface
+            - elasticloadbalancing:DeregisterInstancesFromLoadBalancer
+            - elasticloadbalancing:DeregisterTargets
+            - elasticloadbalancing:Describe*
+            - elasticloadbalancing:RegisterInstancesWithLoadBalancer
+            - elasticloadbalancing:RegisterTargets
+            Resource: '*'
+
+  # ECS tasks execution role
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: ecs-tasks.amazonaws.com
+
+      Path: /
+      Policies:
+      - PolicyName: AmazonEcsTaskExecutionRolePolicy
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - ecr:GetAuthorizationToken
+            - ecr:BatchCheckLayerAvailability
+            - ecr:GetDownloadUrlForLayer
+            - ecr:BatchGetImage
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: '*'
+
+  # Application load balancer SGs
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the containers
+      VpcId:
+        Ref: VPC
+  EcsSecurityGroupHTTPinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: 
+        Ref: AlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: '80'
+      ToPort: '80'
+      CidrIp: 0.0.0.0/0
+  EcsSecurityGroupSSHinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: 
+        Ref: AlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: '22'
+      ToPort: '22'
+      CidrIp: 0.0.0.0/0
+
+  # Application load balancer ECS cluster services
+  ECSALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-alb
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '30'
+      Subnets:
+        - Ref: PublicSubnetOne
+        - Ref: PublicSubnetTwo
+      SecurityGroups:
+        - Ref: AlbSecurityGroup
+
+
+Outputs:
+  ClusterName:
+    Description: The name of the ECS cluster, used by the deploy script
+    Value: !Ref 'ECSCluster'
+    Export:
+      Name: !Join [':', [!Ref "AWS::StackName", "ClusterName" ]]
+  Url:
+    Description: The url at which the application is available
+    Value: !Join ['', [!GetAtt 'ECSALB.DNSName']]
+  ALBArn:
+    Description: The ARN of the ALB, exported for later use in creating services
+    Value: !Ref 'ECSALB'
+    Export:
+      Name: !Join [':', [!Ref "AWS::StackName", "ALBArn" ]]
+  ECSRole:
+    Description: The ARN of the ECS role, exports for later use in creating services
+    Value: !GetAtt 'EcsServiceRole.Arn'
+    Export:
+      Name: !Join [':', [!Ref "AWS::StackName", "ECSRole" ]]
+  VPCId:
+    Description: The ID of the VPC that this stack is deployed in
+    Value: !Ref 'VPC'
+    Export:
+      Name: !Join [':', [!Ref "AWS::StackName", "VPCId" ]]
