@@ -114,6 +114,7 @@ def push_docker_image(serviceName, repo_uri):
 
 def get_cfn_output(stack_name):
     # Get output values of cloudformation template
+    
     output_values = []
     if stack_name:
         try:
@@ -349,7 +350,7 @@ def run(stackName, serviceName, region):
     if stackName and serviceName and region:
         print("Validating service name...")
         if serviceName in service_list:
-
+            
             print("Checking service name.. ", serviceName)
             status = check_ecr_repo(serviceName)
             if status is not True:
@@ -359,7 +360,7 @@ def run(stackName, serviceName, region):
             build_docker_image(serviceName, repo_uri)
             
             # Get cloudformation output values
-            output = get_cfn_output(cloudformation_template_name)
+            output = get_cfn_output(stackName)
             EcsServiceRole = output[0]
             EcsTaskExecRole = output[1]
             ClusterName = output[2]
@@ -375,7 +376,7 @@ def run(stackName, serviceName, region):
             # Create task defination
             create_task_defination(
                 serviceName, 
-                cloudformation_template_name, 
+                stackName, 
                 repo_uri, 
                 EcsTaskExecRole, 
                 VpcId)
