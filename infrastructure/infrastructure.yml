@@ -1,17 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Parameters:
-  ContainerImage:
-    Description: Repository URL for DAM Docker Image
-    Type: String
-  DesiredCapacity:
-    Type: Number
-    Default: '3'
-    Description: Number of instances to launch in your ECS cluster.
-  MaxSize:
-    Type: Number
-    Default: '4'
-    Description: Maximum number of instances that can be launched in your ECS cluster.
-    
+AWSTemplateFormatVersion: '2010-09-09'   
 Mappings:
   SubnetConfig:
     VPC:
@@ -29,6 +16,7 @@ Resources:
       EnableDnsSupport: true
       EnableDnsHostnames: true
       CidrBlock: !FindInMap ['SubnetConfig', 'VPC', 'CIDR']
+
   PublicSubnetOne:
     Type: AWS::EC2::Subnet
     Properties:
@@ -39,6 +27,7 @@ Resources:
       VpcId: !Ref 'VPC'
       CidrBlock: !FindInMap ['SubnetConfig', 'PublicOne', 'CIDR']
       MapPublicIpOnLaunch: true
+
   PublicSubnetTwo:
     Type: AWS::EC2::Subnet
     Properties:
@@ -49,17 +38,21 @@ Resources:
       VpcId: !Ref 'VPC'
       CidrBlock: !FindInMap ['SubnetConfig', 'PublicTwo', 'CIDR']
       MapPublicIpOnLaunch: true
+
   InternetGateway:
     Type: AWS::EC2::InternetGateway
+
   GatewayAttachement:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref 'VPC'
       InternetGatewayId: !Ref 'InternetGateway'
+
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref 'VPC'
+
   PublicRoute:
     Type: AWS::EC2::Route
     DependsOn: GatewayAttachement
@@ -67,11 +60,13 @@ Resources:
       RouteTableId: !Ref 'PublicRouteTable'
       DestinationCidrBlock: '0.0.0.0/0'
       GatewayId: !Ref 'InternetGateway'
+
   PublicSubnetOneRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnetOne
       RouteTableId: !Ref PublicRouteTable
+
   PublicSubnetTwoRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -148,7 +143,31 @@ Resources:
       GroupDescription: Access to the containers
       VpcId:
         Ref: VPC
-  EcsSecurityGroupHTTPinbound:
+
+  ECSServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 8080
+        ToPort: 8080
+        CidrIp: 0.0.0.0/0
+        Description: for frontend api
+      - IpProtocol: tcp
+        FromPort: 8002
+        ToPort: 8002
+        Description: for quotes api
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 8001
+        ToPort: 8001
+        CidrIp: 0.0.0.0/0
+        Description: for newsfeed api
+
+  ALBSecurityGroupHTTPinbound:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId: 
@@ -156,15 +175,6 @@ Resources:
       IpProtocol: tcp
       FromPort: '80'
       ToPort: '80'
-      CidrIp: 0.0.0.0/0
-  EcsSecurityGroupSSHinbound:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: 
-        Ref: AlbSecurityGroup
-      IpProtocol: tcp
-      FromPort: '22'
-      ToPort: '22'
       CidrIp: 0.0.0.0/0
 
   # Application load balancer ECS cluster services
@@ -183,6 +193,116 @@ Resources:
       SecurityGroups:
         - Ref: AlbSecurityGroup
 
+  AlbListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: FrontendTargetGroup
+      LoadBalancerArn:
+        Ref: ECSALB
+      Port: '80'
+      Protocol: HTTP
+
+  QuoteListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: QuotesTargetGroup
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - "/api/quote*"
+      ListenerArn:
+        Ref: AlbListener
+      Priority: 2
+
+  NewsFeedListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: NewsfeedTargetGroup
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - "/api/newsfeed*"
+      ListenerArn:
+        Ref: AlbListener
+      Priority: 3
+
+  FrontendListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: FrontendTargetGroup
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - "/"
+      ListenerArn:
+        Ref: AlbListener
+      Priority: 1
+
+  QuotesTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 4
+      HealthCheckPath: /ping
+      Matcher:
+        HttpCode: '200-299'
+      Name: 'quote-service-tg'
+      Port: 8002
+      Protocol: HTTP
+      UnhealthyThresholdCount: 3
+      TargetType: 'ip'
+      VpcId:
+        Ref: VPC
+
+  NewsfeedTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 4
+      HealthCheckPath: /ping
+      Matcher:
+        HttpCode: '200-299'
+      Name: 'newfeed-service-tg'
+      Port: 8001
+      Protocol: HTTP
+      UnhealthyThresholdCount: 3
+      TargetType: 'ip'
+      VpcId:
+        Ref: VPC
+
+  FrontendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 4
+      HealthCheckPath: /ping
+      Matcher:
+        HttpCode: '200-299'
+      Name: 'frontend-service-tg'
+      Port: 8080
+      Protocol: HTTP
+      UnhealthyThresholdCount: 3
+      TargetType: 'ip'
+      VpcId:
+        Ref: VPC
 
 Outputs:
   ClusterName:
@@ -193,18 +313,42 @@ Outputs:
   Url:
     Description: The url at which the application is available
     Value: !Join ['', [!GetAtt 'ECSALB.DNSName']]
+  ALBName:
+    Description: The url at which the application is available
+    Value: !Join ['', [!GetAtt 'ECSALB.LoadBalancerName']]
   ALBArn:
     Description: The ARN of the ALB, exported for later use in creating services
     Value: !Ref 'ECSALB'
     Export:
       Name: !Join [':', [!Ref "AWS::StackName", "ALBArn" ]]
-  ECSRole:
+  ECSServiceRole:
     Description: The ARN of the ECS role, exports for later use in creating services
     Value: !GetAtt 'EcsServiceRole.Arn'
     Export:
-      Name: !Join [':', [!Ref "AWS::StackName", "ECSRole" ]]
+      Name: !Join [':', [!Ref "AWS::StackName", "ECSServiceRole" ]]
+  ECSTaskExecRole:
+    Description: The ARN of the ECS Task Execution role, exports for later use in creating task defination
+    Value: !GetAtt 'EcsTaskExecutionRole.Arn'
+    Export:
+      Name: !Join [':', [!Ref "AWS::StackName", "ECSTaskExecRole" ]]
   VPCId:
     Description: The ID of the VPC that this stack is deployed in
     Value: !Ref 'VPC'
     Export:
       Name: !Join [':', [!Ref "AWS::StackName", "VPCId" ]]
+  ECSSecurityGroupId:
+    Description: ID of ECS service SGs
+    Value: !GetAtt 'ECSServiceSecurityGroup.GroupId'
+  AlbSecurityGroupId:
+    Description: ID of ALB security Group
+    Value: !GetAtt 'AlbSecurityGroup.GroupId'
+  QuotesTargetGroupArn:
+    Description: ARN for quote target group
+    Value: !Ref 'QuotesTargetGroup'
+  NewsfeedTargetGroupArn:
+    Description: ARN for newfeed target group
+    Value: !Ref 'NewsfeedTargetGroup'
+  FrontendTargetGroupArn:
+    Description: ARN for frontend target group
+    Value: !Ref 'FrontendTargetGroup'
+

@@ -1,0 +1,14 @@
+version: '3'
+services:
+  quotes:
+    build:
+      context: .
+      dockerfile: ./quotes/Dockerfile
+  newsfeed:
+    build:
+      context: .
+      dockerfile: ./newsfeed/Dockerfile
+  front-end:
+    build:
+      context: .
+      dockerfile: ./front-end/Dockerfile
