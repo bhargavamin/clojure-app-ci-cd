@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "static-assets-test-connection"
+  labels:
+    {{- include "clojure-app.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['$(STATIC_ASSETS_SERVICE_HOST):{{ .Values.static_assets.service.port }}/css/bootstrap.min.css']
+  restartPolicy: Never

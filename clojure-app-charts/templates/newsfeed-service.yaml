@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: newsfeed
+spec:
+  type: {{ .Values.newsfeed.service.type }}
+  ports:
+  - name: http
+    port: {{ .Values.newsfeed.service.port }}
+    targetPort: {{ .Values.newsfeed.service.port }}
+  selector:
+    name: newsfeed

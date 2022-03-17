@@ -1,79 +1,138 @@
-# infra-problem submission
+# Infrastructure Problem Thoughtworks
+
+Deploy Clojure app aka [infra-problem repository](https://github.com/ThoughtWorksInc/infra-problem)
+
+Note: Newfeed service doesn't work eventhough all the tests pass. Since the assignment did not say about fixing application related issue, therefore, it was out of scope. (I even mailed HR regarding the same issue but didn't get any response on what to do. However it can be fixed with extra time :) )
+
+Did achieve to somehow deploy it 
+## Getting started
+
+Deploy app & infra from local system.
+
+## **Pre-requiste:**
+
+1. AWS Account
+2. Create IAM user and download Access key and Secret key
+4. Install following packages on local system
+    - Python3
+    - AWS CLI
+    - Docker
+    - Kubectl
+    - Helm
+    - Terraform
+    - Terragrunt
+    - JDK 8
+    - Clojure
+    - Leiningen
+
+## **Setup Infrastructure:**
+
+1. Configure AWS CLI with access key, secret key and region
+2. Set vars using run `pre.deploy.sh -r <aws_region> -p <aws_profile>` file. (if you don't have an aws profile configured then give `default` as input for profile/-p.)
+3. Run `deploy-infra.sh` script, this deploy AWS infra using terragrunt. (Takes around 10-15mins to deploy whole infra)
+
+## **Setup Application**
+
+Once the infra is ready you can proceed to building and deploying application.
+
+1. Run `deploy-app.sh` script, this will build/test/deploy app to EKS Cluster.
+
+Note:
+- Image versioning is handled automatically via `image.env` file once `deploy-app.sh` is executed.
+- App tests can be run using `helm test clojure-app` OR uncomment `helm_test` fuction in `deploy-app.sh` and rerun script.
+
+## **Setup Monitoring**
+
+Setup kubernetes dashboard and access locally or even install `Lens` to view cluster metrics/logs (Recommended)
+
+Go to `monitoring` dir and refer ![README.md](monitoring/README.md)
+
+Monitoring could be improved as future update by deploying daemon set of datadog or newrelic along with pods.
+
+## **Destroy Infra & App**
+
+Uncomment `destroy` functions from `deploy-app.sh` and `deploy-infra.sh`.
+
+## Multi Environment CI/CD
+
+- Using Terragrunt we can create multiple terraform infra by replicating `terragrunt.hcl` directory structure for each env.
+
+- Gitlab CI/CD pipeline can be pepared for both infra and application where infra will have a ci/cd pipeline which deploy to every single environment using terragrunt and with an upstream pipeline which handles CI/CD of application.
+
+![Gitlab CI/CD Pipeline Architecture](diagrams/gitlab_ci_cd_architecture.png)
+
+## Future updates
+
+- CI/CD pipeline for infra aswell as application couple together to give a single interface and overview of whole release pipeline.
+- MR based CI/CD pipeline triggers on Gitlab
+- Role based authentication for terragrunt &  CI/CD pipelines
+
+
+----
+# APP USAGE
+
+This project contains three services:
+
+* `quotes` which serves a random quote from `quotes/resources/quotes.json`
+* `newsfeed` which aggregates several RSS feeds together
+* `front-end` which calls the two previous services and displays the results.
 
 ## Prerequisites
 
 * Java
 * [Leiningen](http://leiningen.org/) (can be installed using `brew install leiningen`)
-* AWS Account
-* AWS cli configured on your system with admin privleges
-* Python 2.7/3.6/3.7
-* Boto3 package (`pip install boto3`)
 
-## Deployment infrastructure and services
+## Running tests
 
-1. Launch an Fargate ECS cluster using the Cloudformation template:
+You can run the tests of all apps by using `make test`
 
-   ```
-   $ aws cloudformation deploy \
-   --template-file infrastructure/infrastructure.yml \
-   --region <region> \
-   --stack-name <stack name> \
-   --capabilities CAPABILITY_NAMED_IAM
-   ```
-2. Build clojure application jar files. Go to `services/' and run following commands
+## Building
 
-    ```
-    $ make libs
-    $ make clean all
-    ```
-This will generate jar files used in docker images.
+First you need to ensure that the common libraries are installed: run `make libs` to install them to your local `~/.m2` repository. This will allow you to build the JARs.
 
-3. Login to ECR
+To build all the JARs and generate the static tarball, run the `make clean all` command from this directory. The JARs and tarball will appear in the `build/` directory.
 
-    ```
-    $ $(aws ecr get-login --no-include-email --region <region>)
-    ```
-Note: the ecr login will be valid for 12 hours
+### Static assets
 
-4. Deploy Quotes and Newsfeed services as containers onto your cluster: 
+`cd` to `front-end/public` and run `./serve.py` (you need Python3 installed). This will serve the assets on port 8000.
 
-   ```
-   $ ./deploy.py <stack_name> <service name> <region>
-   ```
-5. Prereq before pushing Frontend service:
+## Running
 
-    ```
-    open services/front-end/Dockerfile
-    replace the URL for quotes and newsfeed with the loadbalancer url created after executing cloudformation template in Step 1
+All the apps take environment variables to configure them and expose the URL `/ping` which will just return a 200 response that you can use with e.g. a load balancer to check if the app is running.
 
-    ```
-6.  Build & deploy Frontend service:
+### Front-end app
 
-    ```
-    $ ./deploy.py <stack_name> frontend <region>
-    ```
+`java -jar front-end.jar`
+
+*Environment variables*:
+
+* `APP_PORT`: The port on which to run the app
+* `STATIC_URL`: The URL on which to find the static assets
+* `QUOTE_SERVICE_URL`: The URL on which to find the quote service
+* `NEWSFEED_SERVICE_URL`: The URL on which to find the newsfeed service
+* `NEWSFEED_SERVICE_TOKEN`: The authentication token that allows the app to talk to the newsfeed service. This should be treated as an application secret. The value should be: `T1&eWbYXNWG1w1^YGKDPxAWJ@^et^&kX`
+
+### Quote service
+
+`java -jar quotes.jar`
+
+*Environment variables*
+
+* `APP_PORT`: The port on which to run the app
+
+### Newsfeed service
+
+`java -jar newsfeed.jar`
+
+*Environment variables*
+
+* `APP_PORT`: The port on which to run the app
 
 
-# Future additions and evolutions
+----
+## FAQ
 
-Suggestions for Infrastructure CI/CD
-
-- Suggestions extend development environment to multiple/production environments:
- * Create separate account for each environment
- * Split cloudformation template as per services like `alb.yml, iam-role.yml ecs.yml etc`.
- * Create a code pipeline template to include all the above services cloudformation templates in stages.
- * Introduce cloudformation parameters which take environment as variables.
- * Put conditions in templates if you want to limit creation/deployment of resources to a particular environment.
- This way any infrastructure changes first gets deployed in development environment and if there is any issue the codepipeline stops execution and cloudformation rollbacks all the changes.
-
-Suggestions for CI/CD of applications changes
-- Suggestions to setup continous delivery:
- * Use Jenkins of Codebuild to setup a polling job to fetch all the latest code changes
- * A Jenkins or Codebuild job would build all the latest changes 
-    - Use AWS SSM or Jenkins secrets to inject secrets or variables while building
- * Use the build artifact to deploy to a specific environment
-    - There are multiple ways to deploy application changes using:
-        - Deployment plugins and tools 
-        - You can push changes on a versioned AWS S3 bucket which will tried codedeploy to deploy new changes
-        - Better to have separate buckets for each environment to upload artifacts.
- 
+```
+Error saving credentials: error storing credentials - err: exit status 1, out: `Post "http://ipc/registry/credstore-updated": dial unix /Users/bhargav.amin/Library/Containers/com.docker.docker/Data/backend.sock: connect: connection refused`
+```
+`Solution remove ~/.docker/config.json`

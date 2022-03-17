@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: static-assets
+spec:
+  type: {{ .Values.static_assets.service.type }}
+  ports:
+  - name: http
+    port: {{ .Values.static_assets.service.port }}
+    targetPort: {{ .Values.static_assets.service.port }}
+  selector:
+    name: static-assets
