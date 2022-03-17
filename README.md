@@ -1,10 +1,13 @@
-# Infrastructure Problem Thoughtworks
+# Infrastructure Problem
 
 Deploy Clojure app aka [infra-problem repository](https://github.com/ThoughtWorksInc/infra-problem)
 
-Note: Newfeed service doesn't work eventhough all the tests pass. Since the assignment did not say about fixing application related issue, therefore, it was out of scope. (I even mailed HR regarding the same issue but didn't get any response on what to do. However it can be fixed with extra time :) )
+**Note/Updates**
 
-Did achieve to somehow deploy it 
+Newfeed service doesn't work eventhough all the tests pass locally aswell on cloud. 
+Related to this issue on repo [Issue 8](https://github.com/ThoughtWorksInc/infra-problem/issues/8)
+
+
 ## Getting started
 
 Deploy app & infra from local system.
@@ -39,7 +42,7 @@ Once the infra is ready you can proceed to building and deploying application.
 
 Note:
 - Image versioning is handled automatically via `image.env` file once `deploy-app.sh` is executed.
-- App tests can be run using `helm test clojure-app` OR uncomment `helm_test` fuction in `deploy-app.sh` and rerun script.
+- App tests can be run using `helm test clojure-app` OR uncomment `helm_test` function in `deploy-app.sh` and rerun script.
 
 ## **Setup Monitoring**
 
